@@ -1,0 +1,34 @@
+Bring-up logging: WindowServer's command stream allocation failed with nothing logged, then wrote through its null pointer
+(tu_cs_reserve_space's callers ignore its result). Logs a failed BO array or BO allocation or map in tu_cs_add_bo (a GPU address
+the backend could not find is logged by upstream's turnip-darwin-va-exhausted-note.patch).
+
+diff --git a/src/freedreno/vulkan/tu_cs.cc b/src/freedreno/vulkan/tu_cs.cc
+index 47e1939..5577585 100644
+--- a/src/freedreno/vulkan/tu_cs.cc
++++ b/src/freedreno/vulkan/tu_cs.cc
+@@ -155,8 +155,10 @@ tu_cs_add_bo(struct tu_cs *cs, uint32_t size)
+       uint32_t new_capacity = MAX2(4, 2 * bos->bo_capacity);
+       struct tu_bo **new_bos = (struct tu_bo **)
+          realloc(bos->bos, new_capacity * sizeof(struct tu_bo *));
+-      if (!new_bos)
++      if (!new_bos) {
++         mesa_loge("tu_cs_add_bo: %s: BO array of %u failed", cs->name, new_capacity);
+          return VK_ERROR_OUT_OF_HOST_MEMORY;
++      }
+ 
+       bos->bo_capacity = new_capacity;
+       bos->bos = new_bos;
+@@ -171,11 +173,13 @@ tu_cs_add_bo(struct tu_cs *cs, uint32_t size)
+                                               TU_BO_ALLOC_ALLOW_DUMP),
+                      cs->name);
+    if (result != VK_SUCCESS) {
++      mesa_loge("tu_cs_add_bo: %s: %u bytes failed (%d)", cs->name, size * (uint32_t)sizeof(uint32_t), result);
+       return result;
+    }
+ 
+    result = tu_bo_map(cs->device, new_bo, NULL);
+    if (result != VK_SUCCESS) {
++      mesa_loge("tu_cs_add_bo: %s: map of %u bytes failed (%d)", cs->name, size * (uint32_t)sizeof(uint32_t), result);
+       tu_bo_finish(cs->device, new_bo);
+       return result;
+    }

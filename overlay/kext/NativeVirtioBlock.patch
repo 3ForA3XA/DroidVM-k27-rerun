@@ -1,0 +1,61 @@
+diff --git a/NativeVirtioBlock.cpp b/NativeVirtioBlock.cpp
+index 0d1a147..d7c8628 100644
+--- a/NativeVirtioBlock.cpp
++++ b/NativeVirtioBlock.cpp
+@@ -159,7 +159,7 @@ bool NativeVirtioBlock::reset()
+   online = false;
+   write32(0x70, 0);
+   uint64_t deadline;
+-  clock_interval_to_deadline(1000, kMillisecondScale, &deadline);
++  clock_interval_to_deadline(30000, kMillisecondScale, &deadline);
+   while (read32(0x70)) {
+     if (mach_absolute_time() >= deadline) return false;
+     IODelay(1);
+@@ -470,7 +470,12 @@ IOReturn NativeVirtioBlock::readSectors(uint64_t sector, uint32_t bytes)
+   write32(0x50, 0);
+   auto *used = reinterpret_cast<volatile uint16_t *>(queue + 256);
+   uint64_t deadline;
+-  clock_interval_to_deadline(1000, kMillisecondScale, &deadline);
++  clock_interval_to_deadline(30000, kMillisecondScale, &deadline);
++  // port: spin for 20 us, then sleep twice as long each time up to 256 us. IODelay(1) slept on a 1 us timer each time (ArmCpu
++  // registers no idle latency, so no delay spins): ~26000 timer interrupts a second while the disk was busy.
++  uint64_t spinEnd;
++  clock_interval_to_deadline(20, kMicrosecondScale, &spinEnd);
++  uint32_t sleep = 16;
+   while (used[1] == usedIndex) {
+     if (mach_absolute_time() >= deadline) {
+       reset();
+@@ -478,7 +483,9 @@ IOReturn NativeVirtioBlock::readSectors(uint64_t sector, uint32_t bytes)
+       return kIOReturnTimeout;
+     }
+     dmaBarrier();
+-    IODelay(1);
++    if (mach_absolute_time() < spinEnd) continue;
++    IODelay(sleep);
++    if (sleep < 256) sleep *= 2;
+   }
+   dmaBarrier();
+   auto *element = reinterpret_cast<volatile Used *>(queue + 260) + usedIndex % queueSize;
+@@ -522,7 +529,22 @@ bool NativeVirtioBlock::start(IOService *provider)
+   __atomic_fetch_add(&native_virtio_verified_devices, 1, __ATOMIC_RELAXED);
+ #endif
+   native_virtio_read_checkpoint(this);
++  // port: publish once IOResources has matched IOBSD. AppleAPFSContainer::start, when it runs before com_apple_filesystems_apfs::start
++  // (on a disk published while IOResources is still matching), takes APFS's module lock and waits for IOResources matched with IOBSD,
++  // while that matching waits in com_apple_filesystems_apfs::start for the lock: a deadlock, and the root never appears. Once
++  // matched, the container never waits.
++  if (OSDictionary *matching = resourceMatching("IOBSD")) {
++    if (IOService *resources = waitForMatchingService(matching)) resources->release();
++    matching->release();
++  }
++  // and one device after the other, highest MMIO address first: the root volume is the first device, so everything it unions with is
++  // there when it appears (the Data store above them, 0xa002000, is DroidVMDataStore's)
++  static volatile uint32_t published;
++  uint64_t slot = mapping->getPhysicalAddress();
++  uint32_t rank = slot >= 0xa000000 && slot <= 0xa001000 ? static_cast<uint32_t>((0xa001000 - slot) >> 12) : 0;
++  for (unsigned waited = 0; published != rank && waited < 20000; waited += 10) IOSleep(10);
+   registerService();
++  OSIncrementAtomic(reinterpret_cast<volatile SInt32 *>(&published));
+   return true;
+ }
+ 
