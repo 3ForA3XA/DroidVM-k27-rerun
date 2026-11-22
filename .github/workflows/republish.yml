@@ -1,0 +1,34 @@
+name: republish
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: the run whose image artifact to publish
+        default: '44974272155'
+
+permissions:
+  contents: write
+
+jobs:
+  republish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Download the image artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download "${{ inputs.run_id }}" -R "$GITHUB_REPOSITORY" -n "image-27.2-1" -D "$RUNNER_TEMP/image"
+          find "$RUNNER_TEMP/image" -type f | head -30
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete image-27.2-1 --yes --cleanup-tag -R "$GITHUB_REPOSITORY" 2>/dev/null || true
+          gh release create image-27.2-1 -R "$GITHUB_REPOSITORY" --prerelease \
+            --title "k27 27.2 image 1 (encrypted)" \
+            --notes "boot.img and the new install's data-store.img, ARTIFACT_KEY encrypted. Unpack: scripts/ci-blob.sh unpack DIR image.tar.zst.enc.[0-9][0-9][0-9] (key 758240cd107d4486)"
+          cd "$RUNNER_TEMP/image"
+          gh release upload image-27.2-1 -R "$GITHUB_REPOSITORY" --clobber image.tar.zst.enc.* plain/* 2>/dev/null || \
+            gh release upload image-27.2-1 -R "$GITHUB_REPOSITORY" --clobber *
