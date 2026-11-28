@@ -1,0 +1,51 @@
+name: fetch-vmpkg
+
+on:
+  workflow_dispatch:
+    inputs:
+      src_repo:
+        default: 'Yosaki-sonako/macOS-DroidVM'
+      artifact_id:
+        default: '14749469849'
+      expect_sha256:
+        default: 'e06a0ba1c8d416c22871499eacd524b0163122e7d946aae8b0570de5dee14878'
+
+permissions:
+  contents: write
+
+jobs:
+  relay:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Download the upstream vmpkg
+        env:
+          TOKEN: ${{ secrets.UPSTREAM_TOKEN }}
+          SRC: ${{ inputs.src_repo }}
+          ART: ${{ inputs.artifact_id }}
+        run: |
+          mkdir -p /mnt/w && cd /mnt/w
+          curl -fL --retry 3 -H "Authorization: Bearer $TOKEN" -o blob             "https://api.github.com/repos/$SRC/actions/artifacts/$ART/zip"
+          ls -la blob && file blob
+          if unzip -l blob >/dev/null 2>&1; then
+            unzip -o blob -d unz && find unz -type f
+            cp "$(find unz -name '*.vmpkg' | head -1)" macos-27.2.vmpkg
+          else
+            cp blob macos-27.2.vmpkg
+          fi
+          ls -la macos-27.2.vmpkg
+          sha256sum macos-27.2.vmpkg | tee got.sha256
+          grep -q "${{ inputs.expect_sha256 }}" got.sha256 || { echo "::error::sha256 mismatch"; exit 1; }
+      - name: Split and publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd /mnt/w
+          split -b 1900m -d -a 3 macos-27.2.vmpkg macos-27.2.vmpkg.
+          rm -f macos-27.2.vmpkg blob
+          sha256sum macos-27.2.vmpkg.[0-9][0-9][0-9] > SHA256SUMS.txt
+          gh release delete macos-27.2-vmpkg --yes --cleanup-tag -R "$GITHUB_REPOSITORY" 2>/dev/null || true
+          gh release create macos-27.2-vmpkg -R "$GITHUB_REPOSITORY" \
+            --title "macOS 27.2 vmpkg (Yosaki-sonako run 45007832661)" \
+            --notes "cat macos-27.2.vmpkg.[0-9][0-9][0-9] > macos-27.2.vmpkg then import into DroidVM. Expect sha256 e06a0ba1c8d416c22871499eacd524b0163122e7d946aae8b0570de5dee14878"
+          gh release upload macos-27.2-vmpkg -R "$GITHUB_REPOSITORY" --clobber macos-27.2.vmpkg.[0-9][0-9][0-9] SHA256SUMS.txt
