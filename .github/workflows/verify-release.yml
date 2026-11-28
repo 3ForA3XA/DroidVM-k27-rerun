@@ -1,0 +1,23 @@
+name: verify-release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Verify release assets against SHA256SUMS
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/v"
+          cd "$RUNNER_TEMP/v"
+          gh release download macos-27.2-vmpkg -R "$GITHUB_REPOSITORY" -p '*' --clobber
+          ls -la
+          cat SHA256SUMS.txt
+          sha256sum -c SHA256SUMS.txt && echo "VERIFY_PASS" || { echo "VERIFY_FAIL"; exit 1; }
