@@ -1,0 +1,32 @@
+name: republish-fix
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Split 004 and 005 into 500MB chunks
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/w" && cd "$RUNNER_TEMP/w"
+          gh release download macos-27.2-vmpkg -R "$GITHUB_REPOSITORY" -p 'macos-27.2.vmpkg.004' -p 'macos-27.2.vmpkg.005'
+          ls -la
+          for n in 004 005; do
+            split -b 500m -d -a 2 "macos-27.2.vmpkg.$n" "${n}.part."
+            rm -f "macos-27.2.vmpkg.$n"
+          done
+          ls -la
+          sha256sum ${n}.part.* | tee SHA256SUMS-fix.txt
+          sha256sum *.part.* > SHA256SUMS-fix.txt
+          gh release delete vmpkg-fix1 --yes --cleanup-tag -R "$GITHUB_REPOSITORY" 2>/dev/null || true
+          gh release create vmpkg-fix1 -R "$GITHUB_REPOSITORY" \
+            --title "004/005 re-split into 500MB chunks" \
+            --notes "cat 004.part.* > macos-27.2.vmpkg.004 ; cat 005.part.* > macos-27.2.vmpkg.005 then verify with SHA256SUMS.txt of the main release"
+          gh release upload vmpkg-fix1 -R "$GITHUB_REPOSITORY" --clobber 004.part.* 005.part.* SHA256SUMS-fix.txt
