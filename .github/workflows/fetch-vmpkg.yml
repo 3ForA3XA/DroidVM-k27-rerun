@@ -24,7 +24,7 @@ jobs:
           SRC: ${{ inputs.src_repo }}
           ART: ${{ inputs.artifact_id }}
         run: |
-          mkdir -p /mnt/w && cd /mnt/w
+          mkdir -p "$RUNNER_TEMP/w" && cd "$RUNNER_TEMP/w"
           curl -fL --retry 3 -H "Authorization: Bearer $TOKEN" -o blob             "https://api.github.com/repos/$SRC/actions/artifacts/$ART/zip"
           ls -la blob && file blob
           if unzip -l blob >/dev/null 2>&1; then
@@ -40,7 +40,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cd /mnt/w
+          cd "$RUNNER_TEMP/w"
           split -b 1900m -d -a 3 macos-27.2.vmpkg macos-27.2.vmpkg.
           rm -f macos-27.2.vmpkg blob
           sha256sum macos-27.2.vmpkg.[0-9][0-9][0-9] > SHA256SUMS.txt
